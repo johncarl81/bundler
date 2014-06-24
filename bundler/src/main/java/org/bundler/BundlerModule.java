@@ -15,10 +15,16 @@
  */
 package org.bundler;
 
+import com.google.common.collect.ImmutableSet;
 import com.sun.codemodel.JCodeModel;
+import com.sun.codemodel.JDefinedClass;
 import org.androidtransfuse.CodeGenerationScope;
 import org.androidtransfuse.adapter.ASTFactory;
-import org.androidtransfuse.annotations.*;
+import org.androidtransfuse.adapter.ASTType;
+import org.androidtransfuse.annotations.DefineScope;
+import org.androidtransfuse.annotations.DefineScopes;
+import org.androidtransfuse.annotations.Install;
+import org.androidtransfuse.annotations.Provides;
 import org.androidtransfuse.bootstrap.BootstrapModule;
 import org.androidtransfuse.bootstrap.Namespace;
 import org.androidtransfuse.config.MapScope;
@@ -27,6 +33,7 @@ import org.androidtransfuse.config.ThreadLocalScope;
 import org.androidtransfuse.gen.ClassGenerationStrategy;
 import org.androidtransfuse.gen.InjectionBuilderContextFactory;
 import org.androidtransfuse.gen.variableDecorator.VariableExpressionBuilderFactory;
+import org.androidtransfuse.transaction.*;
 import org.androidtransfuse.util.Logger;
 import org.androidtransfuse.util.MessagerLogger;
 import org.androidtransfuse.validation.Validator;
@@ -36,8 +43,10 @@ import javax.annotation.processing.Messager;
 import javax.annotation.processing.ProcessingEnvironment;
 import javax.annotation.processing.RoundEnvironment;
 import javax.inject.Named;
+import javax.inject.Provider;
 import javax.inject.Singleton;
 import javax.lang.model.util.Elements;
+import java.util.Map;
 
 @BootstrapModule
 @DefineScopes({
@@ -102,5 +111,29 @@ public class BundlerModule {
     @ProcessingScope
     public RoundEnvironment getRoundEnvironment(){
         throw new OutOfScopeException("Expected seeded object, unable to construct directly.");
+    }
+
+    @Provides
+    public BundlerProcessor buildProcessor(Provider<PackageHelperGeneratorAdapter> packageHelperGeneratorProvider,
+                                           Provider<BundlerTransactionWorker> bundlerWorkerProvider,
+                                           Provider<BundlersTransactionWorker> bundlersWorkerProvider,
+                                           ScopedTransactionBuilder scopedTransactionBuilder){
+
+
+        TransactionProcessorPool<Provider<ASTType>, BundlerDescriptor> bundlerProcessor =
+                new TransactionProcessorPool<Provider<ASTType>, BundlerDescriptor>();
+        TransactionProcessorPool<Map<Provider<ASTType>, BundlerDescriptor>, JDefinedClass> bundlersProcessor =
+                new TransactionProcessorPool<Map<Provider<ASTType>, BundlerDescriptor>, JDefinedClass>();
+
+        TransactionProcessor processor =
+                new TransactionProcessorChannel<Provider<ASTType>, BundlerDescriptor, JDefinedClass>(
+                        bundlerProcessor,
+                        bundlersProcessor,
+                        scopedTransactionBuilder.buildFactory(bundlersWorkerProvider));
+
+        TransactionProcessor processorChain = new TransactionProcessorChain(processor,
+                new TransactionProcessorPredefined(ImmutableSet.of(scopedTransactionBuilder.build(packageHelperGeneratorProvider))));
+
+        return new BundlerProcessor(processorChain, bundlerProcessor, bundlerWorkerProvider, scopedTransactionBuilder);
     }
 }

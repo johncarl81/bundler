@@ -15,16 +15,22 @@
  */
 package org.bundler;
 
-import org.androidtransfuse.annotations.ScopeReference;
+import com.google.common.base.Function;
+import com.google.common.collect.FluentIterable;
+import com.google.common.collect.ImmutableSet;
+import org.androidtransfuse.adapter.element.ReloadableASTElementFactory;
 import org.androidtransfuse.bootstrap.Bootstrap;
 import org.androidtransfuse.bootstrap.Bootstraps;
-import org.androidtransfuse.config.EnterableScope;
 import org.androidtransfuse.scope.ScopeKey;
 
-import javax.annotation.processing.*;
+import javax.annotation.processing.AbstractProcessor;
+import javax.annotation.processing.ProcessingEnvironment;
+import javax.annotation.processing.RoundEnvironment;
+import javax.annotation.processing.SupportedAnnotationTypes;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import javax.lang.model.SourceVersion;
+import javax.lang.model.element.Element;
 import javax.lang.model.element.TypeElement;
 import java.util.Set;
 
@@ -35,11 +41,10 @@ import java.util.Set;
 @Bootstrap
 public class BundlerAnnotationProcessor extends AbstractProcessor {
 
-    //@Inject
-    //private ReloadableASTElementFactory reloadableASTElementFactory;
     @Inject
-    @ScopeReference(ProcessingScope.class)
-    private EnterableScope processingScope;
+    private BundlerProcessor processor;
+    @Inject
+    private ReloadableASTElementFactory reloadableASTElementFactory;
 
     @Override
     public synchronized void init(ProcessingEnvironment processingEnv) {
@@ -53,11 +58,22 @@ public class BundlerAnnotationProcessor extends AbstractProcessor {
     @Override
     public boolean process(Set<? extends TypeElement> typeElements, RoundEnvironment roundEnvironment) {
 
-        processingScope.enter();
+        ImmutableSet<Element> containingElements = FluentIterable
+                .from(roundEnvironment.getElementsAnnotatedWith(Bundled.class))
+                .transform(new Function<Element, Element>() {
+                    public Element apply(Element element) {
+                        return element.getEnclosingElement();
+                    }
+                }).toSet();
 
-        processingScope.seed(ScopeKey.of(RoundEnvironment.class), roundEnvironment);
+        processor.submit(reloadableASTElementFactory.buildProviders(containingElements));
 
-        processingScope.exit();
+        processor.execute();
+
+        if (roundEnvironment.processingOver()) {
+            // Throws an exception if errors still exist.
+            processor.checkForErrors();
+        }
 
         return true;
     }
